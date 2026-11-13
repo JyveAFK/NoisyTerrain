@@ -1,0 +1,109 @@
+[gd_scene format=3 uid="uid://bmj8p5ok5lln3"]
+
+[ext_resource type="Script" uid="uid://d4lebjgbvy57x" path="res://addons/noise_terrain/noise_terrain.gd" id="1_onu7k"]
+[ext_resource type="Resource" uid="uid://4ug3w48dm1l8" path="res://demo/terrain_settings.tres" id="2_s1s6j"]
+[ext_resource type="Shader" uid="uid://dsmiuh7ddjkqo" path="res://addons/noise_terrain/shaders/sky_clouds.gdshader" id="3_onvmd"]
+[ext_resource type="Script" uid="uid://c4qqj8gm5ibdc" path="res://addons/noise_terrain/noise_terrain_sky.gd" id="4_oeqrt"]
+[ext_resource type="Script" uid="uid://bcbdd28l5acl5" path="res://demo/fly_camera.gd" id="5_ykvhj"]
+[ext_resource type="Script" uid="uid://cvnes0u286jeh" path="res://demo/hud.gd" id="6_1rqa4"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_s1s6j"]
+shading_mode = 2
+albedo_color = Color(0.11764706, 0.28235295, 0, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_onu7k"]
+material = SubResource("StandardMaterial3D_s1s6j")
+radial_segments = 4
+rings = 1
+is_hemisphere = true
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_xm42s"]
+shader = ExtResource("3_onvmd")
+shader_parameter/clouds_enabled = true
+shader_parameter/cloud_scale = 12000.0
+shader_parameter/cloud_coverage = 0.36
+shader_parameter/cloud_softness = 0.14
+shader_parameter/cloud_wisp = 0.6
+shader_parameter/cloud_base = 3400.0
+shader_parameter/cloud_thickness = 500.0
+shader_parameter/cloud_wind = Vector2(8, 3)
+shader_parameter/world_origin = Vector2(0, 0)
+shader_parameter/zenith_color = Color(0.13, 0.33, 0.72, 1)
+shader_parameter/horizon_color = Color(0.74, 0.83, 0.92, 1)
+shader_parameter/ground_color = Color(0.45, 0.5, 0.55, 1)
+shader_parameter/cloud_lit_color = Color(1, 0.98, 0.95, 1)
+shader_parameter/cloud_shade_color = Color(0.5, 0.56, 0.68, 1)
+shader_parameter/cloud_far = 70000.0
+shader_parameter/cloud_steps = 8
+shader_parameter/cloud_extinction = 0.012
+shader_parameter/cloud_dither = 0.35
+
+[sub_resource type="Sky" id="Sky_tdg64"]
+sky_material = SubResource("ShaderMaterial_xm42s")
+process_mode = 2
+radiance_size = 1
+
+[sub_resource type="Environment" id="Environment_nk31j"]
+background_mode = 2
+background_energy_multiplier = 1.2
+sky = SubResource("Sky_tdg64")
+ambient_light_source = 3
+reflected_light_source = 2
+tonemap_mode = 4
+tonemap_exposure = 1.32
+tonemap_agx_contrast = 1.18
+ssil_enabled = true
+glow_enabled = true
+glow_normalized = true
+glow_blend_mode = 2
+fog_enabled = true
+fog_light_color = Color(0.74, 0.83, 0.92, 1)
+fog_sun_scatter = 0.15
+fog_density = 3.5e-05
+fog_sky_affect = 0.0
+volumetric_fog_density = 0.001
+
+[node name="Demo" type="Node3D" unique_id=1692342158]
+
+[node name="NoiseTerrain" type="Node3D" parent="." unique_id=1040858659]
+script = ExtResource("1_onu7k")
+settings = ExtResource("2_s1s6j")
+lod_distance = 1.2000000000000002
+cells_per_frame = 4
+tree_mesh = SubResource("SphereMesh_onu7k")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=72241361]
+transform = Transform3D(0.81915206, 0.35312894, -0.45198444, 0, 0.7880108, 0.6156615, 0.57357645, -0.5043204, 0.64550066, 0, 0, 0)
+directional_shadow_mode = 0
+directional_shadow_max_distance = 1500.0
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=199024645]
+environment = SubResource("Environment_nk31j")
+
+[node name="NoiseTerrainSky" type="Node" parent="." unique_id=1445209110 node_paths=PackedStringArray("terrain", "sun", "world_environment")]
+script = ExtResource("4_oeqrt")
+terrain = NodePath("../NoiseTerrain")
+sun = NodePath("../Sun")
+world_environment = NodePath("../WorldEnvironment")
+
+[node name="FlyCamera" type="Camera3D" parent="." unique_id=1424144463 node_paths=PackedStringArray("terrain")]
+transform = Transform3D(0.9659258, -0.05381151, 0.25316322, 0, 0.9781476, 0.2079117, -0.25881904, -0.20082727, 0.944818, 600, 420, 1500)
+current = true
+fov = 65.0
+near = 0.5
+far = 80000.0
+script = ExtResource("5_ykvhj")
+terrain = NodePath("../NoiseTerrain")
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1384505628]
+
+[node name="Info" type="Label" parent="HUD" unique_id=1310676396 node_paths=PackedStringArray("terrain", "camera")]
+offset_left = 12.0
+offset_top = 8.0
+offset_right = 12.0
+offset_bottom = 8.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+script = ExtResource("6_1rqa4")
+terrain = NodePath("../../NoiseTerrain")
+camera = NodePath("../../FlyCamera")
