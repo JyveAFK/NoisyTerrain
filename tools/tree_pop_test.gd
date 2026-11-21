@@ -4,6 +4,8 @@ extends SceneTree
 ## Smooth fades change a little each frame and are not counted.
 ## Run: godot --headless --path . -s tools/tree_pop_test.gd [-- --frames=600 --speed=2 --jobs=0]
 ## (speed is metres per frame at 60 fps: 2 = 120 m/s, 12 = 720 m/s; jobs 0 = automatic)
+## Add --back to fly out for half the frames and back along the same line (reuses kept cells).
+## Add --lag for deterministic build lag (no threads, about one cell built per frame).
 ## Add --fixed-fps 60 before -s so every frame is exactly 1/60 s of game time (time-based
 ## fade-ins are then judged per real frame; cells get more build time than in real play).
 
@@ -31,6 +33,10 @@ func _run() -> void:
 	var terrain := NoiseTerrain.new()
 	terrain.settings = load("res://demo/terrain_settings.tres")
 	terrain.max_jobs = jobs
+	if OS.get_cmdline_user_args().has("--lag"):
+		# Deterministic build lag: no threads, about one cell built per frame.
+		terrain.use_threads = false
+		terrain.main_thread_budget_ms = 1.0
 	var target := Node3D.new()
 	target.position = Vector3(600.0, 140.0, 1500.0)
 	terrain.target = target
@@ -54,8 +60,12 @@ func _run() -> void:
 	var appear := 0
 	var vanish := 0
 	var swap := 0
+	var out_and_back := OS.get_cmdline_user_args().has("--back")
 	for f in frames:
-		target.position += Vector3(speed * 0.3, 0.0, -speed)
+		if f == frames / 2:
+			print("halfway: %d cells waiting, %d built so far" % [terrain.get_pending_count(), terrain.get_build_count() if terrain.has_method("get_build_count") else -1])
+		var direction := -1.0 if out_and_back and f >= frames / 2 else 1.0
+		target.position += Vector3(speed * 0.3, 0.0, -speed) * direction
 		target.position.y = terrain.get_height(target.position.x, target.position.z) + 140.0
 		await create_timer(0.0166).timeout
 		var now := _visible_trees(terrain, target, fading)

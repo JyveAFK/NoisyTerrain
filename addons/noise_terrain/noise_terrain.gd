@@ -48,6 +48,17 @@ signal progress(done: int, total: int)
 @export_range(1, 32) var cells_per_frame: int = 6
 ## Print a progress line for every streaming batch, not only the big ones.
 @export var log_all_batches: bool = false
+## A cell merges back into its bigger parent only once you are this many times further than
+## the distance it split at, so hovering near the boundary does not flicker. 1 = no margin.
+@export_range(1.0, 2.0) var merge_margin: float = 1.15
+## Cells you move away from are kept, hidden, instead of being thrown away, so coming back
+## shows them at once with no rebuild. A cell is only dropped once you are this many times
+## further than where it stops being shown (its parent's merge distance), so it scales with
+## cell size. 1 = drop as soon as it stops being shown.
+@export_range(1.0, 10.0) var keep_distance_factor: float = 3.0
+## Upper limit on the kept (hidden) cells, in megabytes of mesh and tree data (an estimate).
+## Past it, the furthest kept cells are dropped first.
+@export var cache_memory_mb: float = 100.0
 ## Re-centre the world when the target is this far from the origin (0 = never).
 @export var shift_distance: float = 8192.0
 ## Move the target back with the world when the origin shifts.
@@ -92,6 +103,11 @@ var _nodes := {} # Vector3i(lod, x, z) -> MeshInstance3D, built and in the scene
 var _desired := {} # Vector3i -> distance, the cells we want on screen
 var _base := {} # Every big cell in range. These are always built and kept as a safety net.
 var _active := {} # Big cells currently shown as a stand-in because finer cells are late.
+var _cache := {} # Vector3i -> MeshInstance3D: built cells no longer wanted, kept hidden for reuse.
+var _cache_bytes := 0
+var _was_split := {} # Cells split on the last selection (for the merge margin).
+var _build_count := 0
+var _select_at := Vector3.ZERO # World x, z and altitude term of the last selection.
 var _queue: Array[Vector3i] = []
 var _running := {}
 var _results: Array = []
@@ -215,6 +231,21 @@ func get_cell_count() -> int:
 	return _nodes.size()
 
 
+## Built cells kept hidden for reuse.
+func get_cached_count() -> int:
+	return _cache.size()
+
+
+## Estimated memory of the kept cells, in megabytes.
+func get_cache_mb() -> float:
+	return float(_cache_bytes) / 1048576.0
+
+
+## How many cells have been built since start-up (reused cells do not count).
+func get_build_count() -> int:
+	return _build_count
+
+
 func get_pending_count() -> int:
 	return _queue.size() + _running.size()
 
@@ -257,6 +288,8 @@ func _shift_origin(follow: Node3D) -> void:
 	_origin_z += offset.z
 	for key in _nodes:
 		_nodes[key].position -= offset
+	for key in _cache:
+		_cache[key].position -= offset
 	if move_target_on_shift:
 		follow.global_position -= offset
 	_last_select -= offset
@@ -281,11 +314,15 @@ func _select(wx: float, wy: float, wz: float) -> void:
 	var cx := floori(wx / s)
 	var cz := floori(wz / s)
 	var reach := (float(view_cells) + 0.5) * (float(view_cells) + 0.5)
+	var split_now := {}
 	for dz in range(-view_cells, view_cells + 1):
 		for dx in range(-view_cells, view_cells + 1):
 			if float(dx * dx + dz * dz) <= reach:
 				_base[Vector3i(0, cx + dx, cz + dz)] = true
-				_visit(0, cx + dx, cz + dz, wx, wz, altitude)
+				_visit(0, cx + dx, cz + dz, wx, wz, altitude, split_now)
+	_was_split = split_now
+	_select_at = Vector3(wx, wz, altitude)
+	_reuse_cached()
 	_queue.clear()
 	for key in _desired:
 		if not _nodes.has(key) and not _running.has(key):
@@ -304,19 +341,94 @@ func _select(wx: float, wy: float, wz: float) -> void:
 			_batch_logged = -1
 		_batch_total = _batch_done + waiting
 	_resolve()
+	_trim_cache(wx, wz, altitude)
 
 
-func _visit(lod: int, x: int, z: int, wx: float, wz: float, altitude: float) -> void:
+func _visit(lod: int, x: int, z: int, wx: float, wz: float, altitude: float, split_now: Dictionary) -> void:
 	var size := settings.cell_size / float(1 << lod)
-	var dx := wx - clampf(wx, float(x) * size, float(x + 1) * size)
-	var dz := wz - clampf(wz, float(z) * size, float(z + 1) * size)
-	var distance := sqrt(dx * dx + dz * dz + altitude * altitude)
-	if lod < max_lod and distance < size * lod_distance:
+	var key := Vector3i(lod, x, z)
+	var distance := _cell_distance(key, wx, wz, altitude)
+	# Split at the usual distance; once split, merge back only a little further out. (Only the
+	# merge moves: a coarse cell is never shown closer than size x lod_distance, which the tree
+	# fades rely on.)
+	var limit := size * lod_distance * (merge_margin if _was_split.has(key) else 1.0)
+	if lod < max_lod and distance < limit:
+		split_now[key] = true
 		for j in 2:
 			for i in 2:
-				_visit(lod + 1, x * 2 + i, z * 2 + j, wx, wz, altitude)
+				_visit(lod + 1, x * 2 + i, z * 2 + j, wx, wz, altitude, split_now)
 	else:
-		_desired[Vector3i(lod, x, z)] = distance
+		_desired[key] = distance
+
+
+func _cell_distance(key: Vector3i, wx: float, wz: float, altitude: float) -> float:
+	var size := settings.cell_size / float(1 << key.x)
+	var dx := wx - clampf(wx, float(key.y) * size, float(key.y + 1) * size)
+	var dz := wz - clampf(wz, float(key.z) * size, float(key.z + 1) * size)
+	return sqrt(dx * dx + dz * dz + altitude * altitude)
+
+
+# ---------------------------------------------------------------- the cell cache
+
+## Brings kept cells that are wanted again back into play (still hidden: _resolve shows them
+## when it is their turn). Their trees fade in as for a newly built cell.
+func _reuse_cached() -> void:
+	if _cache.is_empty():
+		return
+	for wanted in [_desired, _base]:
+		for key in wanted:
+			if _nodes.has(key) or not _cache.has(key):
+				continue
+			var cell: MeshInstance3D = _cache[key]
+			_cache.erase(key)
+			_cache_bytes -= int(cell.get_meta("bytes", 0))
+			if cell.get_child_count() > 0:
+				cell.set_meta("fresh_rank", _fresh_rank(key))
+			_nodes[key] = cell
+
+
+## Hides a cell that is no longer wanted and keeps it for reuse.
+func _retire(key: Vector3i) -> void:
+	var cell: MeshInstance3D = _nodes[key]
+	_nodes.erase(key)
+	_active.erase(key)
+	cell.visible = false
+	if cell.has_meta("fresh_rank"):
+		cell.remove_meta("fresh_rank")
+	_cache[key] = cell
+	_cache_bytes += int(cell.get_meta("bytes", 0))
+
+
+## Drops kept cells once you are far enough away (keep_distance_factor times the distance at
+## which each stops being shown), then the furthest ones while over the memory limit.
+func _trim_cache(wx: float, wz: float, altitude: float) -> void:
+	if _cache.is_empty():
+		return
+	var distances := {}
+	for key in _cache.keys():
+		var size := settings.cell_size / float(1 << key.x)
+		var shown_until := 2.0 * size * lod_distance * merge_margin
+		var distance := _cell_distance(key, wx, wz, altitude)
+		if distance > shown_until * maxf(keep_distance_factor, 1.0):
+			_drop_cached(key)
+		else:
+			distances[key] = distance
+	var limit := int(cache_memory_mb * 1048576.0)
+	if _cache_bytes <= limit:
+		return
+	var order := distances.keys()
+	order.sort_custom(func(a: Vector3i, b: Vector3i) -> bool: return distances[a] > distances[b])
+	for key in order:
+		if _cache_bytes <= limit:
+			break
+		_drop_cached(key)
+
+
+func _drop_cached(key: Vector3i) -> void:
+	var cell: MeshInstance3D = _cache[key]
+	_cache.erase(key)
+	_cache_bytes -= int(cell.get_meta("bytes", 0))
+	cell.queue_free()
 
 
 func _urgency(key: Vector3i) -> float:
@@ -363,9 +475,7 @@ func _resolve() -> void:
 		if keep:
 			kept[key] = true # Stays as it is: shown, or hidden under an older cell that is also kept.
 		else:
-			_nodes[key].queue_free()
-			_nodes.erase(key)
-			_active.erase(key)
+			_retire(key)
 
 	# Find wanted cells that nothing is standing in for, and switch on the big cell under them.
 	if not spare_roots.is_empty():
@@ -475,9 +585,14 @@ func _collect() -> void:
 			WorkerThreadPool.wait_for_task_completion(_running[key])
 		_running.erase(key)
 		_batch_done += 1
-		if (_desired.has(key) or _base.has(key)) and not _nodes.has(key):
-			_add_cell(r)
+		_build_count += 1
+		if _nodes.has(key) or _cache.has(key):
+			continue
+		_add_cell(r)
+		if not (_desired.has(key) or _base.has(key)):
+			_retire(key) # Arrived after it stopped being wanted: keep it for later.
 	_resolve()
+	_trim_cache(_select_at.x, _select_at.y, _select_at.z)
 	_report()
 
 
@@ -507,6 +622,10 @@ func _add_cell(r: Dictionary) -> void:
 		cell.add_child(_tree_instance(r, _tree_card, _tree_card_material, false))
 		if r.size <= tree_model_cell_size:
 			cell.add_child(_tree_instance(r, _tree_model, null, true)) # Materials are on the mesh.
+	# Estimated GPU memory: vertex (position, normal, colour), 16-bit indices, tree instances
+	# (cards everywhere, models as well in close cells).
+	var trees_bytes: int = r.tree_count * 64 * (2 if r.size <= tree_model_cell_size else 1)
+	cell.set_meta("bytes", r.vertex_count * 20 + _indices.size() * 2 + trees_bytes)
 	add_child(cell)
 	_nodes[r.key] = cell
 
@@ -714,7 +833,7 @@ func _build(key: Vector3i) -> void:
 
 	var result := {
 		"key": key, "mesh": mesh, "x": ox, "z": oz, "size": size,
-		"tree_buffer": tree_buffer, "tree_count": tree_count,
+		"tree_buffer": tree_buffer, "tree_count": tree_count, "vertex_count": vertices.size(),
 	}
 	_mutex.lock()
 	_results.append(result)

@@ -1,7 +1,7 @@
-[gd_resource type="Resource" script_class="NoiseTerrainSettings" format=3 uid="uid://4ug3w48dm1l8"]
+[gd_resource type="Resource" script_class="NoiseTerrainSettings" load_steps=9 format=3]
 
-[ext_resource type="Script" uid="uid://barnrsd2rjn17" path="res://addons/noise_terrain/noise_terrain_cell_override.gd" id="1_djyv6"]
-[ext_resource type="Script" uid="uid://gapj2go0tvb2" path="res://addons/noise_terrain/noise_terrain_settings.gd" id="2_qms2q"]
+[ext_resource type="Script" path="res://addons/noise_terrain/noise_terrain_cell_override.gd" id="1_djyv6"]
+[ext_resource type="Script" path="res://addons/noise_terrain/noise_terrain_settings.gd" id="2_qms2q"]
 
 [sub_resource type="Curve" id="Curve_0lt3m"]
 _limits = [-1.0, 1.0, 0.0, 1.0]
@@ -12,10 +12,6 @@ point_count = 6
 _data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.5, 0), 0.0, 0.0, 0, 0, Vector2(0.72, 1), 0.0, 0.0, 0, 0, Vector2(1, 1), 0.0, 0.0, 0, 0]
 point_count = 4
 
-[sub_resource type="Gradient" id="Gradient_qms2q"]
-offsets = PackedFloat32Array(0, 0.5018248, 0.81569344)
-colors = PackedColorArray(0, 0, 0, 1, 0.4921875, 0.4921875, 0.4921875, 1, 0.27734375, 0.27734375, 0.27734375, 1)
-
 [sub_resource type="FastNoiseLite" id="FastNoiseLite_vyamd"]
 noise_type = 2
 seed = 7
@@ -23,15 +19,16 @@ frequency = 0.02
 cellular_return_type = 6
 
 [sub_resource type="NoiseTexture2D" id="NoiseTexture2D_7es7k"]
+width = 256
+height = 256
 noise = SubResource("FastNoiseLite_vyamd")
-color_ramp = SubResource("Gradient_qms2q")
 
 [sub_resource type="Resource" id="Resource_ri65j"]
 script = ExtResource("1_djyv6")
 cell = Vector2i(0, -1)
 height_map = SubResource("NoiseTexture2D_7es7k")
-mode = 1
 base_height = 40.0
+height_scale = 700.0
 blend_margin = 0.25
 
 [sub_resource type="Curve" id="Curve_usp6t"]

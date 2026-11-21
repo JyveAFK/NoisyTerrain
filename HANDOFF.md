@@ -6,7 +6,9 @@ what is left.
 
 ## Goal
 
-Endless terrain for Godot 4 in GDScript. The owner cares
+Endless terrain for Godot 4 in GDScript, inspired by a flying video from KanaWorks_AI
+(https://x.com/KanaWorks_AI/status/2120098607382880627). That video's terrain comes from an
+AI model (Terrain Diffusion). This project deliberately uses noise instead: the owner cares
 about the look and likes noise-made data.
 
 Requirements given so far:
@@ -170,3 +172,42 @@ godot --headless --path . -s tools/stream_test.gd -- --speed=10 [--nothreads] [-
 godot --path . -s tools/screenshot.gd -- --quick --only=start,sky
 godot --rendering-method gl_compatibility --path .
 ```
+
+## Cell cache and merge margin (14 Nov 2026)
+
+All in `noise_terrain.gd`. Unwanted cells go to `_cache` (hidden) via `_retire()` (called
+where `_resolve()` used to free them) instead of being freed. `_reuse_cached()` (in
+`_select()`, before the build queue) brings wanted ones back and arms their tree fade.
+`_trim_cache()` (end of `_select()` and `_collect()`) drops cells beyond
+`keep_distance_factor x 2 x size x lod_distance x merge_margin` (the parent's merge distance)
+and then the furthest while over `cache_memory_mb` (bytes estimated per cell in
+`_add_cell()`, meta "bytes"). Build results that arrive after the cell stopped being wanted
+are kept. `_visit()` takes a `split_now` dict and keeps `_was_split`, so a split cell merges
+back only past `merge_margin`. `_shift_origin()` moves cached cells too. New public:
+`get_cached_count()`, `get_cache_mb()`, `get_build_count()`; new helpers `_cell_distance()`,
+`_drop_cached()`.
+
+Checked: 1 km round trip rebuilds 1 cell on the way back (was 139); far trip drops cells past
+their keep distance; a 10 MB limit holds exactly; hovering +-55 m across a split boundary:
+0 detail changes (was 7 in 8 swings); kept cells never visible; origin shifts keep live and
+kept cells in place; stationary = no builds, no changes; cache accounting exact; stream tests
+and tree pop tests (120 and 720 m/s) clean. Cost with ~300 kept cells: visibility update
+~0.9 ms, trim ~0.3 ms (sandbox).
+
+Known (pre-existing, not from the cache): while finer cells build, `_resolve()` keeps the
+coarse cell on screen until all of its wanted cells are built, even if some finer cells (on
+screen or kept) could cover parts of it. Under heavy build lag this shows a coarse cell close
+up for a moment (trees in it are cards, so models appear when the finer cells land). A
+"finest built cover" rewrite of `_resolve()` was tried (kept outside the project); it was not
+shown to help in deterministic tests, so it was left out.
+
+Noticed, not investigated: distant trees (baked cards) look paler than before the card bake.
+
+### For the FloatingIslands roll-forward
+
+- Hidden cells still collide there (collision bodies on cells): disable on retire, re-enable
+  on reuse.
+- Its `_stop()` (rebuild) must clear `_cache` too.
+- Its `_visit()` skips empty cells; nothing in the cache logic depends on four children, but
+  check `_resolve()`'s keep rules still behave at island edges.
+

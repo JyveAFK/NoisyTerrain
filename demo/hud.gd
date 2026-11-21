@@ -22,6 +22,6 @@ func _process(_delta: float) -> void:
 	var state := "ready"
 	if terrain.is_loading():
 		state = "building cells %d / %d (%d%%)" % [_done, _total, _done * 100 / maxi(_total, 1)]
-	text = "%d fps   %s\nposition %.0f, %.0f   height %.0f m   speed %.0f m/s\ncells on screen %d   waiting %d\nRight mouse or Tab: look   WASD QE: fly   Shift: fast   Wheel: speed" % [
+	text = "%d fps   %s\nposition %.0f, %.0f   height %.0f m   speed %.0f m/s\ncells on screen %d   waiting %d   kept %d (%.0f MB)   built %d\nRight mouse or Tab: look   WASD QE: fly   Shift: fast   Wheel: speed" % [
 		Engine.get_frames_per_second(), state, w.x, w.z, w.y, camera.speed,
-		terrain.get_cell_count(), terrain.get_pending_count()]
+		terrain.get_cell_count(), terrain.get_pending_count(), terrain.get_cached_count(), terrain.get_cache_mb(), terrain.get_build_count()]

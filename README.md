@@ -40,6 +40,28 @@ Every height comes only from world position and the seed, so the same seed alway
 - Progress is printed to the console (stage, cells done / total, per cent) and sent on the
   `progress(done, total)` signal, which the demo HUD shows.
 
+## Keeping cells (the cache)
+
+Cells you move away from are not thrown away: they are hidden and kept, so coming back shows
+them at once instead of rebuilding. Settings on `NoiseTerrain` (Streaming group):
+
+- `keep_distance_factor` (default 3): a kept cell is dropped once you are this many times
+  further than where it stops being shown (where its bigger parent takes over). It is a
+  multiple, so it scales with every cell size: a 128 m cell is kept to about 1.5 km, a 1 km
+  cell to about 12 km.
+- `cache_memory_mb` (default 100): limit on kept cells (an estimate of their mesh and tree
+  memory). Past it, the furthest are dropped first. Most cells are 0.1-0.2 MB, forested 256 m
+  cells up to about 0.5 MB. With the default keep distance the cache settles around
+  300 cells / 30 MB on its own, so the limit is a safety net.
+- `merge_margin` (default 1.15): a cell merges back into its parent only 15% further out
+  than it split, so hovering near a boundary does not flicker. Only merging moves (a coarse
+  cell is never shown closer than its split distance, which the tree fades rely on).
+
+Kept cells that are wanted again come back without a rebuild, and cells that finish building
+after you have moved on are kept rather than thrown away. The HUD shows kept cells, their
+memory and cells built so far; `get_cached_count()`, `get_cache_mb()` and `get_build_count()`
+give the same.
+
 ## Trees
 
 Every tree is a fixed thing in the world. Trees sit on one fine world grid, and a coarser
@@ -133,6 +155,11 @@ To try it on desktop: `godot --rendering-method gl_compatibility --path .`
   swap model/card in one frame). Add `--fixed-fps 60` before `-s` for a 1/60 s game clock.
 - `tools/tree_subset_test.gd` checks coarse cells hold exactly a subset of the finer cells' trees.
 - `tools/tree_coverage.gd` measures tree coverage by distance, to compare density settings.
+- `tools/cache_test.gd`: round trip reuse, keep distance and memory limit (`-- --cache-mb=10`),
+  hover flicker at a split boundary, floating origin with kept cells.
+- `tools/standin_test.gd`: coarse cells shown although finer ones are built, view cover (no
+  overlaps, no gaps), settling when stopped, cache accounting. `--lag` = one cell built per frame.
+- `tools/tree_pop_test.gd -- --back` flies out and back along the same line; `--lag` as above.
 - `tools/screenshot.gd` renders test shots.
 
 ## Not done yet
@@ -141,7 +168,3 @@ To try it on desktop: `godot --rendering-method gl_compatibility --path .`
 - Smooth blending of the ground between detail levels (ground cells swap in one step; trees fade).
 - Water is one level everywhere, so lakes only form on low ground.
 - Tree cards use a drawn silhouette, not a baked impostor of the model.
-
-
-## Notes
-- Made with Claude Fable 5.2

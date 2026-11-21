@@ -20,7 +20,7 @@ extends Node
 		clouds_enabled = value
 		_dirty = true
 ## Height in metres of the flat cloud bases. Keep it above your highest mountains and the player.
-@export var cloud_height: float = 6400.0:
+@export var cloud_height: float = 3400.0:
 	set(value):
 		cloud_height = value
 		_dirty = true
@@ -29,7 +29,7 @@ extends Node
 	set(value):
 		cloud_thickness = value
 		_dirty = true
-@export_range(0.0, 1.0) var cloud_coverage: float = 0.32:
+@export_range(0.0, 1.0) var cloud_coverage: float = 0.36:
 	set(value):
 		cloud_coverage = value
 		_dirty = true
@@ -52,12 +52,12 @@ extends Node
 	set(value):
 		cloud_wind = value
 		_dirty = true
-@export_range(0.0, 1.0) var cloud_shadow_strength: float = 0.8:
+@export_range(0.0, 1.0) var cloud_shadow_strength: float = 0.65:
 	set(value):
 		cloud_shadow_strength = value
 		_dirty = true
 ## Ray steps through the cloud layer. Fewer = faster, more = smoother.
-@export_range(4, 48) var cloud_steps: int = 8:
+@export_range(4, 48) var cloud_steps: int = 16:
 	set(value):
 		cloud_steps = value
 		_dirty = true
